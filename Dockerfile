@@ -1,16 +1,7 @@
-ARG GCC_BUILDER_VERSION=latest
 ARG UBUNTU_VERSION=latest
 
-# The GCC Dockerimage is based on Debian and already
-# provides all important tools to build the build2 toolchain.
-FROM gcc:${GCC_BUILDER_VERSION} AS builder
-ARG BUILD2_VERSION=0.13.0
-RUN \
-  curl -sSfO https://download.build2.org/$BUILD2_VERSION/build2-install-$BUILD2_VERSION.sh && \
-  sh build2-install-$BUILD2_VERSION.sh --yes --sudo false --no-check --trust yes /opt/build2
-
-
-FROM ubuntu:${UBUNTU_VERSION} AS deployer
+# Base Stage
+FROM ubuntu:${UBUNTU_VERSION} AS base
 ARG CLANG_VERSION=10
 RUN \
   echo "CLANG_VERSION=$CLANG_VERSION" && \
@@ -39,9 +30,26 @@ RUN \
   update-alternatives --set c++ /usr/bin/clang++ && \
   update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-$CLANG_VERSION 10 && \
   update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-$CLANG_VERSION 10
-# To keep the links for the build2 shared library,
-# we have to copy the build2 toolchain to the same destination.
+
+# build2 Build Stage
+FROM base AS builder
+ARG BUILD2_VERSION=0.13.0
+RUN \
+  echo "BUILD2_VERSION=$BUILD2_VERSION" && \
+  apt-get update && \
+  apt-get install -y \
+    # To bootstrap the build2 toolchain more efficiently,
+    # Make has to be installed.
+    make \
+  && \
+  rm -rf /var/lib/apt/lists/* && \
+  curl -sSfO https://download.build2.org/$BUILD2_VERSION/build2-install-$BUILD2_VERSION.sh && \
+  sh build2-install-$BUILD2_VERSION.sh --cxx clang++ --yes --sudo false --no-check --trust yes /opt/build2
+
+# Deployment Stage
+FROM base AS deployer
+# To keep the links for the build2 shared libraries,
+# we have to copy the build2 toolchain to same destination.
 COPY --from=builder /opt/build2 /opt/build2
-# Set the environment variable to be able to call 'b', 'bdep', and 'bpkg'.
 ENV PATH "/opt/build2/bin:$PATH"
 LABEL maintainer="lyrahgames@mailbox.org"
